@@ -6,6 +6,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use futures::{SinkExt, StreamExt};
 
+const HELP_MSG: &str = "There is no help message yet";
+
 #[tokio::main]
 pub async fn main() {
     // Bind the listener to the address
@@ -28,10 +30,18 @@ async fn process(mut socket: TcpStream) -> anyhow::Result<()> {
     let (reader, writer) = socket.split();
     let mut stream = FramedRead::new(reader, LinesCodec::new());
     let mut sink = FramedWrite::new(writer, LinesCodec::new());
+    
+    sink.send(HELP_MSG).await?;
 
     while let Some(Ok(mut line)) = stream.next().await {
-        line.push_str("😚");
-        sink.send(line).await?;
+        if line.starts_with("/help") {
+            sink.send(HELP_MSG).await?;
+        } else if line.starts_with("/exit") {
+            break;
+        } else {
+            line.push_str("😚");
+            sink.send(line).await?;
+        }
     }
     anyhow::Ok(())
 }
