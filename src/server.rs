@@ -1,8 +1,10 @@
 use tokio::net::{TcpListener, TcpStream};
-// use bytes::Bytes;
-// use std::collections::HashMap;
-// use std::sync::{Arc, Mutex};
+use bytes::Bytes;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
+use futures::{SinkExt, StreamExt};
 
 #[tokio::main]
 pub async fn main() {
@@ -12,6 +14,7 @@ pub async fn main() {
 
     loop {
         let (socket, addr) = listener.accept().await.unwrap();
+        
         // 为每一条连接都生成一个新的任务，
         // `socket` 的所有权将被移动到新的任务中，并在那里进行处理
         println!("\x1b[34mSERVER:\x1b[0m accepted connection from: \x1b[32m{}\x1b[0m", addr);
@@ -22,13 +25,13 @@ pub async fn main() {
 }
 
 async fn process(mut socket: TcpStream) -> anyhow::Result<()> {
-    let mut buffer = [0u8; 16];
-    loop {
-        let n = socket.read(&mut buffer).await?;
-        if n == 0 {
-            break;
-        }
-        let _ = socket.write(&buffer[..n]).await?;
+    let (reader, writer) = socket.split();
+    let mut stream = FramedRead::new(reader, LinesCodec::new());
+    let mut sink = FramedWrite::new(writer, LinesCodec::new());
+
+    while let Some(Ok(mut line)) = stream.next().await {
+        line.push_str("😚");
+        sink.send(line).await?;
     }
     anyhow::Ok(())
 }
