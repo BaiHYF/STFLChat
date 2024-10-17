@@ -1,11 +1,8 @@
 use tokio::{net::{TcpListener, TcpStream},  sync::broadcast::{self, Sender}};
 use std::{collections::HashSet, sync::{Arc, Mutex}};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use futures::{SinkExt, StreamExt};
-
-const HELP_MSG: &str = "To send a msg: /send user message";
-const WELCOM_MSG: &str = "Please enter your username: ";
+use crate::text::*;
 
 type UserNames = Arc<Mutex<HashSet<String>>>;
 
@@ -40,7 +37,11 @@ async fn process_user(
     let mut stream = FramedRead::new(reader, LinesCodec::new());
     let mut sink = FramedWrite::new(writer, LinesCodec::new());
     let mut channel_recevier = channel_sender.subscribe();
-    sink.send(WELCOM_MSG).await?;
+    
+    sink.send(generate_welcome_message()).await?; // send welcome message
+
+    // Get username input
+    sink.send(generate_input_username_message()).await?;
     let mut name = String::new();
     while let Some(Ok(line)) = stream.next().await {
         if !line.is_empty() && !users.lock().unwrap().contains(&line) {
@@ -52,12 +53,14 @@ async fn process_user(
     }
     users.lock().unwrap().insert(name.clone());
 
+    // main loop
     loop {
+        sink.send(format!("Hello @{} >", name)).await?;
         tokio::select! {
             send_msg = stream.next() => {
                 let send_msg = send_msg.unwrap()?;
                 if send_msg.starts_with("/help") {
-                    sink.send(HELP_MSG).await?;
+                    sink.send(generate_help_message()).await?;
                 } else if send_msg.starts_with("/exit") {
                     break;
                 } else if send_msg.starts_with("/users") {
@@ -72,19 +75,18 @@ async fn process_user(
                 } else if send_msg.starts_with("/send") {
                     let tmp = send_msg.split(" ").collect::<Vec<_>>();
                     if tmp.len() < 3 {
-                        sink.send("Invalid command, please try again").await?;
+                        sink.send("Usage: /send <username> <message>").await?;
                         continue;
                     }
                     let receiver_user = tmp[1];
                     let send_msg = tmp[2..].join(" ");
                     let msgback = format!("{}|{}|{}", name, receiver_user, send_msg);
                     let _ = channel_sender.send(msgback);
+                } else {
+                    sink.send(format!("Command not found")).await?;
                 }
             },
-            recv_msg = channel_recevier.recv() => {
-                // parse the message and find its reciver
-                // if the reciver is the current user, send it to the client
-                
+            recv_msg = channel_recevier.recv() => {        
                 let recv_msg = recv_msg?;
                 let tmp = recv_msg.split("|").collect::<Vec<_>>();
                 let sender = tmp[0];
@@ -101,3 +103,4 @@ async fn process_user(
     users.lock().unwrap().remove(&name);
     anyhow::Ok(())
 }
+
