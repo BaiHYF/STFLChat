@@ -1,11 +1,10 @@
 use tokio::{net::{TcpListener, TcpStream},  sync::broadcast::{self, Sender}};
-use bytes::Bytes;
 use std::{collections::HashSet, sync::{Arc, Mutex}};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
-use futures::{channel::oneshot::channel, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 
-const HELP_MSG: &str = "There is no help message yet";
+const HELP_MSG: &str = "To send a msg: /send user message";
 const WELCOM_MSG: &str = "Please enter your username: ";
 
 type UserNames = Arc<Mutex<HashSet<String>>>;
@@ -70,20 +69,35 @@ async fn process_user(
                         msg += "\n";
                     }
                     sink.send(msg).await?;
-                } 
-                else {
-                    let msgback = format!("{}|{}", name, send_msg);
+                } else if send_msg.starts_with("/send") {
+                    let tmp = send_msg.split(" ").collect::<Vec<_>>();
+                    if tmp.len() < 3 {
+                        sink.send("Invalid command, please try again").await?;
+                        continue;
+                    }
+                    let receiver_user = tmp[1];
+                    let send_msg = tmp[2..].join(" ");
+                    let msgback = format!("{}|{}|{}", name, receiver_user, send_msg);
                     let _ = channel_sender.send(msgback);
                 }
             },
             recv_msg = channel_recevier.recv() => {
                 // parse the message and find its reciver
                 // if the reciver is the current user, send it to the client
-
+                
                 let recv_msg = recv_msg?;
-                sink.send(recv_msg).await?;
+                let tmp = recv_msg.split("|").collect::<Vec<_>>();
+                let sender = tmp[0];
+                let receiver = tmp[1];
+                if receiver != name {
+                    continue;
+                }
+                let recv_msg = tmp[2..].join("|");
+                sink.send(format!("From {}: {}", sender, recv_msg)).await?;
             }
         }
     }
+
+    users.lock().unwrap().remove(&name);
     anyhow::Ok(())
 }
